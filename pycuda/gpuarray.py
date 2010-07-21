@@ -473,7 +473,7 @@ class GPUArray(object):
                 dtype=self.dtype,
                 allocator=self.allocator,
                 base=self,
-                gpudata=int(self.gpudata) + start*self.dtype.itemsize)
+                gpudata=drv.DeviceAllocation(int(self.gpudata) + start*self.dtype.itemsize, False))
 
     # complex-valued business -------------------------------------------------
     @property

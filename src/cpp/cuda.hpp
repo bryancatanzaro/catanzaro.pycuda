@@ -1089,6 +1089,9 @@ namespace cuda
       device_allocation(CUdeviceptr devptr)
         : m_valid(true), m_devptr(devptr)
       { }
+      device_allocation(CUdeviceptr devptr, bool valid)
+        : m_valid(valid), m_devptr(devptr)
+      { }
 
       void free()
       {
