@@ -8,7 +8,10 @@ Version 0.94
     Version 0.94 is the current development version. You can get it from
     PyCUDA's version control repository.
 
-* Support for CUDA 3.0 beta.
+* Support for CUDA 3.0. (but not CUDA 3.0 beta!)
+  Search for "CUDA 3.0" in :ref:`reference-doc` to see what's new.
+* Support for CUDA 3.1 beta.
+  Search for "CUDA 3.1" in :ref:`reference-doc` to see what's new.
 * Add sparse matrix-vector multiplication and linear system solving code,
   in :mod:`pycuda.sparse`.
 * Add :func:`pycuda.gpuarray.if_positive`, :func:`pycuda.gpuarray.maximum`,
@@ -18,16 +21,17 @@ Version 0.94
 * Use :func:`pycuda.tools.make_default_context` in :mod:`pycuda.autoinit`,
   which changes its behavior.
 * Remove previously deprecated features:
- + :attr:`pycuda.driver.Function.registers`, 
-   :attr:`pycuda.driver.Function.lmem`, and
-   :attr:`pycuda.driver.Function.smem` have been deprecated in favor of the
-   mechanism above. See :attr:`pycuda.driver.Function.num_regs` for more.
- + the three-argument forms (i.e. with streams)
-   of :func:`pycuda.driver.memcpy_dtoh` and
-   :func:`pycuda.driver.memcpy_htod`. Use 
-   :func:`pycuda.driver.memcpy_dtoh_async`
-   and :func:`pycuda.driver.memcpy_htod_async` instead.
- + :class:`pycuda.driver.SourceModule`.
+
+  * :attr:`pycuda.driver.Function.registers`, 
+    :attr:`pycuda.driver.Function.lmem`, and
+    :attr:`pycuda.driver.Function.smem` have been deprecated in favor of the
+    mechanism above. See :attr:`pycuda.driver.Function.num_regs` for more.
+  * the three-argument forms (i.e. with streams)
+    of :func:`pycuda.driver.memcpy_dtoh` and
+    :func:`pycuda.driver.memcpy_htod`. Use 
+    :func:`pycuda.driver.memcpy_dtoh_async`
+    and :func:`pycuda.driver.memcpy_htod_async` instead.
+  * :class:`pycuda.driver.SourceModule`.
 
 * Add :func:`pycuda.tools.context_dependent_memoize`, use it for
   context-dependent caching of PyCUDA's canned kernels.
@@ -36,6 +40,11 @@ Version 0.94
   (requested by Dan Lepage)
 * Add preliminary support for complex numbers.
   (initial discussion with Daniel Fan)
+* Add 
+  :attr:`pycuda.gpuarray.GPUArray.real`,
+  :attr:`pycuda.gpuarray.GPUArray.imag`,
+  :meth:`pycuda.gpuarray.GPUArray.conj`.
+* Add :class:`pycuda.driver.PointerHolderBase`.
 
 Version 0.93
 ------------

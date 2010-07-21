@@ -51,6 +51,9 @@ namespace
         || err.code() == CUDA_ERROR_NO_BINARY_FOR_GPU
         || err.code() == CUDA_ERROR_FILE_NOT_FOUND
         || err.code() == CUDA_ERROR_NOT_READY
+#if CUDA_VERSION >= 3000 && defined(CUDAPP_POST_30_BETA)
+        || err.code() == CUDA_ERROR_ECC_UNCORRECTABLE
+#endif
         )
       PyErr_SetString(CudaRuntimeError.get(), err.what());
     else if (err.code() == CUDA_ERROR_UNKNOWN)
@@ -381,6 +384,35 @@ namespace
     CUDAPP_CALL_GUARDED(cuMemcpyAtoH, (buf, ary.handle(), index, len));
   }
 
+
+
+
+  // A class the user can override to make device_allocation-
+  // workalikes.
+
+  class pointer_holder_base
+  {
+    public:
+      virtual ~pointer_holder_base() { }
+      virtual CUdeviceptr get_pointer() = 0;
+      operator CUdeviceptr()
+      { return get_pointer(); }
+  };
+
+  class pointer_holder_base_wrap 
+    : public pointer_holder_base, 
+    public py::wrapper<pointer_holder_base>
+  {
+    public:
+      CUdeviceptr get_pointer()
+      {
+        return this->get_override("get_pointer")();
+      }
+  };
+
+
+
+
   bool have_gl_ext()
   {
 #ifdef HAVE_GL
@@ -460,7 +492,13 @@ BOOST_PYTHON_MODULE(_driver)
 #if CUDA_VERSION >= 3000
   {
     py::class_<array3d_flags> cls("array3d_flags", py::no_init);
+    // deprecated
     cls.attr("ARRAY3D_2DARRAY") = CUDA_ARRAY3D_2DARRAY;
+
+    cls.attr("2DARRAY") = CUDA_ARRAY3D_2DARRAY;
+#if CUDA_VERSION >= 3010
+    cls.attr("SURFACE_LDST") = CUDA_ARRAY3D_SURFACE_LDST;
+#endif
   }
 #endif
 
@@ -516,8 +554,21 @@ BOOST_PYTHON_MODULE(_driver)
     .value("MAXIMUM_TEXTURE2D_ARRAY_WIDTH", CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_ARRAY_WIDTH)
     .value("MAXIMUM_TEXTURE2D_ARRAY_HEIGHT", CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_ARRAY_HEIGHT)
     .value("MAXIMUM_TEXTURE2D_ARRAY_NUMSLICES", CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_ARRAY_NUMSLICES)
+#ifdef CUDAPP_POST_30_BETA
+    .value("SURFACE_ALIGNMENT", CU_DEVICE_ATTRIBUTE_SURFACE_ALIGNMENT)
+    .value("CONCURRENT_KERNELS", CU_DEVICE_ATTRIBUTE_CONCURRENT_KERNELS)
+    .value("ECC_ENABLED", CU_DEVICE_ATTRIBUTE_ECC_ENABLED)
+#endif
 #endif
     ;
+
+#if CUDA_VERSION >= 3000 && defined(CUDAPP_POST_30_BETA)
+  py::enum_<CUfunc_cache_enum>("func_cache")
+    .value("PREFER_NONE", CU_FUNC_CACHE_PREFER_NONE)
+    .value("PREFER_SHARED", CU_FUNC_CACHE_PREFER_SHARED)
+    .value("PREFER_L1", CU_FUNC_CACHE_PREFER_L1)
+    ;
+#endif
 
 #if CUDA_VERSION >= 2020
   py::enum_<CUfunction_attribute>("function_attribute")
@@ -526,6 +577,10 @@ BOOST_PYTHON_MODULE(_driver)
     .value("CONST_SIZE_BYTES", CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES)
     .value("LOCAL_SIZE_BYTES", CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES)
     .value("NUM_REGS", CU_FUNC_ATTRIBUTE_NUM_REGS)
+#if CUDA_VERSION >= 3000 && defined(CUDAPP_POST_30_BETA)
+    .value("PTX_VERSION", CU_FUNC_ATTRIBUTE_PTX_VERSION)
+    .value("BINARY_VERSION", CU_FUNC_ATTRIBUTE_BINARY_VERSION)
+#endif
     .value("MAX", CU_FUNC_ATTRIBUTE_MAX)
     ;
 #endif
@@ -584,6 +639,14 @@ BOOST_PYTHON_MODULE(_driver)
   }
 #endif
 
+#if CUDA_VERSION >= 3010
+  py::enum_<CUlimit>("limit")
+    .value("STACK_SIZE", CU_LIMIT_STACK_SIZE)
+    .value("PRINTF_FIFO_SIZE", CU_LIMIT_PRINTF_FIFO_SIZE)
+    ;
+#endif
+
+
   // graphics enums -----------------------------------------------------------
 #if CUDA_VERSION >= 3000
   py::enum_<CUgraphicsRegisterFlags>("graphics_register_flags")
@@ -605,7 +668,6 @@ BOOST_PYTHON_MODULE(_driver)
     .value("NEGATIVE_Z", CU_CUBEMAP_FACE_NEGATIVE_Z)
     ;
 #endif
-
 
   py::def("init", init,
       py::arg("flags")=0);
@@ -650,6 +712,13 @@ BOOST_PYTHON_MODULE(_driver)
 
       .def("get_current", (boost::shared_ptr<cl> (*)()) &cl::current_context)
       .staticmethod("get_current")
+
+#if CUDA_VERSION >= 3010
+      .DEF_SIMPLE_METHOD(set_limit)
+      .staticmethod("set_limit")
+      .DEF_SIMPLE_METHOD(get_limit)
+      .staticmethod("get_limit")
+#endif
       ;
   }
 
@@ -671,6 +740,11 @@ BOOST_PYTHON_MODULE(_driver)
       .def("get_texref", module_get_texref, 
           (py::args("self", "name")),
           py::return_value_policy<py::manage_new_object>())
+#if CUDA_VERSION >= 3010
+      .def("get_surfref", module_get_surfref, 
+          (py::args("self", "name")),
+          py::return_value_policy<py::manage_new_object>())
+#endif
       ;
   }
 
@@ -700,6 +774,9 @@ BOOST_PYTHON_MODULE(_driver)
 #if CUDA_VERSION >= 2020
       .DEF_SIMPLE_METHOD(get_attribute)
 #endif
+#if CUDA_VERSION >= 3000 && defined(CUDAPP_POST_30_BETA)
+      .DEF_SIMPLE_METHOD(set_cache_config)
+#endif
       ;
   }
 
@@ -712,6 +789,16 @@ BOOST_PYTHON_MODULE(_driver)
       ;
 
     py::implicitly_convertible<device_allocation, CUdeviceptr>();
+  }
+
+  {
+    typedef pointer_holder_base cl;
+    py::class_<pointer_holder_base_wrap, boost::noncopyable>(
+        "PointerHolderBase")
+      .def("get_pointer", py::pure_virtual(&cl::get_pointer))
+      ;
+
+    py::implicitly_convertible<pointer_holder_base, CUdeviceptr>();
   }
 
   {
@@ -919,6 +1006,17 @@ BOOST_PYTHON_MODULE(_driver)
       .DEF_SIMPLE_METHOD(get_flags)
       ;
   }
+
+#if CUDA_VERSION >= 3010
+  {
+    typedef surface_reference cl;
+    py::class_<cl, boost::noncopyable>("SurfaceReference", py::no_init)
+      .DEF_SIMPLE_METHOD(set_array)
+      .def("get_array", &cl::get_array,
+          py::return_value_policy<py::manage_new_object>())
+      ;
+  }
+#endif
 
   py::scope().attr("TRSA_OVERRIDE_FORMAT") = CU_TRSA_OVERRIDE_FORMAT;
   py::scope().attr("TRSF_READ_AS_INTEGER") = CU_TRSF_READ_AS_INTEGER;

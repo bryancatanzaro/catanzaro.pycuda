@@ -478,36 +478,135 @@ class GPUArray(object):
     # complex-valued business -------------------------------------------------
     @property
     def real(self):
-        # FIXME
-        return self
+        dtype = self.dtype
+        if issubclass(dtype.type, numpy.complexfloating):
+            from pytools import match_precision
+            real_dtype = match_precision(numpy.dtype(numpy.float64), dtype)
+
+            result = self._new_like_me(dtype=real_dtype)
+
+            func = elementwise.get_real_kernel(dtype, real_dtype)
+            func.set_block_shape(*self._block)
+            func.prepared_async_call(self._grid, None,
+                    self.gpudata, result.gpudata,
+                    self.mem_size)
+
+            return result
+        else:
+            return self
 
     @property
     def imag(self):
-        # FIXME
-        return zeros_like(self)
+        dtype = self.dtype
+        if issubclass(self.dtype.type, numpy.complexfloating):
+            from pytools import match_precision
+            real_dtype = match_precision(numpy.dtype(numpy.float64), dtype)
+
+            result = self._new_like_me(dtype=real_dtype)
+
+            func = elementwise.get_imag_kernel(dtype, real_dtype)
+            func.set_block_shape(*self._block)
+            func.prepared_async_call(self._grid, None,
+                    self.gpudata, result.gpudata,
+                    self.mem_size)
+
+            return result
+        else:
+            return zeros_like(self)
 
     def conj(self):
-        # FIXME
-        return self
+        dtype = self.dtype
+        if issubclass(self.dtype.type, numpy.complexfloating):
+            result = self._new_like_me()
 
-    # rich comparisons (or rather, lack thereof) ------------------------------
+            func = elementwise.get_conj_kernel(dtype)
+            func.set_block_shape(*self._block)
+            func.prepared_async_call(self._grid, None,
+                    self.gpudata, result.gpudata,
+                    self.mem_size)
+
+            return result
+        else:
+            return self
+
+    # rich comparisons 
     def __eq__(self, other):
-        raise NotImplementedError
+        """Return self == other"""
+
+        result = self._new_like_me()
+
+        func = elementwise.get_eq_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result        
 
     def __ne__(self, other):
-        raise NotImplementedError
+        """Return self != other"""
+
+        result = self._new_like_me()
+
+        func = elementwise.get_ne_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result     
 
     def __le__(self, other):
-        raise NotImplementedError
+        """Return self <= other"""
+
+        result = self._new_like_me()
+
+        func = elementwise.get_le_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result
 
     def __ge__(self, other):
-        raise NotImplementedError
+        """Return self >= other"""
 
+        result = self._new_like_me()
+
+        func = elementwise.get_ge_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result
+    
     def __lt__(self, other):
-        raise NotImplementedError
+        """Return self < other"""
+
+        result = self._new_like_me()
+
+        func = elementwise.get_lt_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result
 
     def __gt__(self, other):
-        raise NotImplementedError
+        """Return self > other"""
+
+        result = self._new_like_me()
+
+        func = elementwise.get_gt_kernel(self.dtype, other.dtype, result.dtype)
+        func.set_block_shape(*self._block)
+        func.prepared_async_call(self._grid, None,
+                self.gpudata, other.gpudata, result.gpudata,
+                self.mem_size)
+
+        return result
 
 
 
@@ -842,18 +941,26 @@ def if_positive(criterion, then_, else_, out=None, stream=None):
 
 
 
-def maximum(a, b, out=None, stream=None):
-    # silly, but functional
-    return if_positive(a.mul_add(1, b, -1, stream=stream), a, b, 
-            stream=stream, out=out)
+def _make_binary_minmax_func(which):
+    def f(a, b, out=None, stream=None):
+        if out is None:
+            out = empty_like(a)
+
+        func = elementwise.get_binary_minmax_kernel(which,
+                a.dtype, b.dtype, out.dtype)
+
+        func.set_block_shape(*a._block)
+        func.prepared_async_call(a._grid, stream,
+                a.gpudata, b.gpudata, out.gpudata, a.size)
+
+        return out
+    return f
 
 
 
 
-def minimum(a, b, out=None, stream=None):
-    # silly, but functional
-    return if_positive(a.mul_add(1, b, -1, stream=stream), b, a, 
-            stream=stream, out=out)
+minimum = _make_binary_minmax_func("min")
+maximum = _make_binary_minmax_func("max")
 
 
 

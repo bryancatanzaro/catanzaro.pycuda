@@ -32,6 +32,7 @@
 
 
 // #define CUDAPP_TRACE_CUDA
+#define CUDAPP_POST_30_BETA
 
 
 
@@ -182,10 +183,22 @@ namespace cuda
 #if CUDA_VERSION >= 3000
           case CUDA_ERROR_NOT_MAPPED_AS_ARRAY: return "not mapped as array";
           case CUDA_ERROR_NOT_MAPPED_AS_POINTER: return "not mapped as pointer";
+#ifdef CUDAPP_POST_30_BETA
+          case CUDA_ERROR_ECC_UNCORRECTABLE: return "ECC uncorrectable";
+#endif
+#endif
+#if CUDA_VERSION >= 3010
+          case CUDA_ERROR_UNSUPPORTED_LIMIT: return "unsupported limit";
 #endif
 
           case CUDA_ERROR_INVALID_SOURCE: return "invalid source";
           case CUDA_ERROR_FILE_NOT_FOUND: return "file not found";
+#if CUDA_VERSION >= 3010
+          case CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND:
+            return "shared object symbol not found";
+          case CUDA_ERROR_SHARED_OBJECT_INIT_FAILED:
+            return "shared object init failed";
+#endif
 
           case CUDA_ERROR_INVALID_HANDLE: return "invalid handle";
 
@@ -199,8 +212,10 @@ namespace cuda
           case CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING: return "launch incompatible texturing";
 
 #if CUDA_VERSION >= 3000
-          case CUDA_ERROR_POINTER_IS_64BIT: return "pointer is 64-bit";
-          case CUDA_ERROR_SIZE_IS_64BIT: return "size is 64-bit";
+          case CUDA_ERROR_POINTER_IS_64BIT:
+             return "attempted to retrieve 64-bit pointer via 32-bit api function";
+          case CUDA_ERROR_SIZE_IS_64BIT:
+             return "attempted to retrieve 64-bit size via 32-bit api function";
 #endif
 
           case CUDA_ERROR_UNKNOWN: return "unknown";
@@ -211,14 +226,14 @@ namespace cuda
   };
 
   struct cannot_activate_out_of_thread_context : public std::logic_error
-  { 
+  {
     cannot_activate_out_of_thread_context(std::string const &w)
       : std::logic_error(w)
     { }
   };
 
   struct cannot_activate_dead_context : public std::logic_error
-  { 
+  {
     cannot_activate_dead_context(std::string const &w)
       : std::logic_error(w)
     { }
@@ -310,16 +325,16 @@ namespace cuda
   };
 
   inline
-  void init(unsigned int flags) 
-  { 
-    CUDAPP_CALL_GUARDED(cuInit, (flags)); 
+  void init(unsigned int flags)
+  {
+    CUDAPP_CALL_GUARDED(cuInit, (flags));
   }
 
   inline
   device *make_device(int ordinal)
-  { 
+  {
     CUdevice result;
-    CUDAPP_CALL_GUARDED(cuDeviceGet, (&result, ordinal)); 
+    CUDAPP_CALL_GUARDED(cuDeviceGet, (&result, ordinal));
     return new device(result);
   }
 
@@ -334,8 +349,8 @@ namespace cuda
    */
 
   // for friend decl
-  namespace gl { 
-    boost::shared_ptr<context> 
+  namespace gl {
+    boost::shared_ptr<context>
         make_gl_context(device const &dev, unsigned int flags);
   }
 
@@ -388,7 +403,7 @@ namespace cuda
 
     public:
       context(CUcontext ctx)
-        : m_context(ctx), m_valid(true), m_use_count(1), 
+        : m_context(ctx), m_valid(true), m_use_count(1),
         m_thread(boost::this_thread::get_id())
       { }
 
@@ -449,7 +464,7 @@ namespace cuda
             }
             else
             {
-              // In all likelihood, this context's managing thread has exited, and 
+              // In all likelihood, this context's managing thread has exited, and
               // therefore this context has already been deleted. No need to harp
               // on the fact that we still thought there was cleanup to do.
 
@@ -464,7 +479,7 @@ namespace cuda
             boost::shared_ptr<context> new_active = current_context(this);
             if (new_active.get())
             {
-              CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (new_active->m_context)); 
+              CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (new_active->m_context));
             }
           }
         }
@@ -474,9 +489,9 @@ namespace cuda
       }
 
       static device get_device()
-      { 
+      {
         CUdevice dev;
-        CUDAPP_CALL_GUARDED(cuCtxGetDevice, (&dev)); 
+        CUDAPP_CALL_GUARDED(cuCtxGetDevice, (&dev));
         return device(dev);
       }
 
@@ -487,12 +502,12 @@ namespace cuda
         if (!context_stack::get().empty())
         {
           CUcontext popped;
-          CUDAPP_CALL_GUARDED(cuCtxPopCurrent, (&popped)); 
+          CUDAPP_CALL_GUARDED(cuCtxPopCurrent, (&popped));
         }
       }
 
       static void pop()
-      { 
+      {
         prepare_context_switch();
         context_stack &ctx_stack = context_stack::get();
 
@@ -510,7 +525,7 @@ namespace cuda
 
         current = current_context();
         if (current)
-          CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (current_context()->m_context)); 
+          CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (current_context()->m_context));
       }
 #else
       static void prepare_context_switch() { }
@@ -527,7 +542,7 @@ namespace cuda
             return boost::shared_ptr<context>();
 
           boost::shared_ptr<context> result(context_stack::get().top());
-          if (result.get() != except 
+          if (result.get() != except
               && result->is_valid())
           {
             // good, weak pointer didn't expire
@@ -539,9 +554,23 @@ namespace cuda
         }
       }
 
+#if CUDA_VERSION >= 3010
+      static void set_limit(CUlimit limit, size_t value)
+      {
+        CUDAPP_CALL_GUARDED(cuCtxSetLimit, (limit, value));
+      }
+
+      static size_t get_limit(CUlimit limit)
+      {
+        size_t value;
+        CUDAPP_CALL_GUARDED(cuCtxGetLimit, (&value, limit));
+        return value;
+      }
+#endif
+
       friend class device;
       friend void context_push(boost::shared_ptr<context> ctx);
-      friend boost::shared_ptr<context> 
+      friend boost::shared_ptr<context>
           gl::make_gl_context(device const &dev, unsigned int flags);
   };
 
@@ -566,10 +595,10 @@ namespace cuda
 #if CUDA_VERSION >= 2000
   inline
   void context_push(boost::shared_ptr<context> ctx)
-  { 
+  {
     context::prepare_context_switch();
 
-    CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (ctx->m_context)); 
+    CUDAPP_CALL_GUARDED(cuCtxPushCurrent, (ctx->m_context));
     context_stack::get().push(ctx);
     ++ctx->m_use_count;
   }
@@ -582,7 +611,7 @@ namespace cuda
   {
     if (!m_stack.empty())
     {
-      std::cerr 
+      std::cerr
         << "-------------------------------------------------------------------" << std::endl
         << "PyCUDA ERROR: The context stack was not empty upon module cleanup." << std::endl
         << "-------------------------------------------------------------------" << std::endl
@@ -645,7 +674,7 @@ namespace cuda
     public:
       scoped_context_activation(boost::shared_ptr<context> ctx)
         : m_context(ctx)
-      { 
+      {
         if (!m_context->is_valid())
           throw cuda::cannot_activate_dead_context(
               "cannot activate dead context");
@@ -686,11 +715,11 @@ namespace cuda
       { CUDAPP_CALL_GUARDED(cuStreamCreate, (&m_stream, flags)); }
 
       ~stream()
-      { 
+      {
         try
         {
           scoped_context_activation ca(get_context());
-          CUDAPP_CALL_GUARDED_CLEANUP(cuStreamDestroy, (m_stream)); 
+          CUDAPP_CALL_GUARDED_CLEANUP(cuStreamDestroy, (m_stream));
         }
         CUDAPP_CATCH_CLEANUP_ON_DEAD_CONTEXT(stream);
       }
@@ -702,16 +731,16 @@ namespace cuda
       { return m_stream; }
 
       bool is_done() const
-      { 
+      {
 #ifdef TRACE_CUDA
         std::cerr << "cuStreamQuery" << std::endl;
 #endif
         CUresult result = cuStreamQuery(m_stream);
         switch (result)
         {
-          case CUDA_SUCCESS: 
+          case CUDA_SUCCESS:
             return true;
-          case CUDA_ERROR_NOT_READY: 
+          case CUDA_ERROR_NOT_READY:
             return false;
           default:
             throw error("cuStreamQuery", result);
@@ -754,7 +783,7 @@ namespace cuda
           try
           {
             scoped_context_activation ca(get_context());
-            CUDAPP_CALL_GUARDED_CLEANUP(cuArrayDestroy, (m_array)); 
+            CUDAPP_CALL_GUARDED_CLEANUP(cuArrayDestroy, (m_array));
           }
           CUDAPP_CATCH_CLEANUP_ON_DEAD_CONTEXT(array);
 
@@ -809,10 +838,10 @@ namespace cuda
       { }
 
       ~texture_reference()
-      { 
+      {
         if (m_managed)
         {
-          CUDAPP_CALL_GUARDED_CLEANUP(cuTexRefDestroy, (m_texref)); 
+          CUDAPP_CALL_GUARDED_CLEANUP(cuTexRefDestroy, (m_texref));
         }
       }
 
@@ -823,17 +852,17 @@ namespace cuda
       { return m_texref; }
 
       void set_array(boost::shared_ptr<array> ary)
-      { 
-        CUDAPP_CALL_GUARDED(cuTexRefSetArray, (m_texref, 
-            ary->handle(), CU_TRSA_OVERRIDE_FORMAT)); 
+      {
+        CUDAPP_CALL_GUARDED(cuTexRefSetArray, (m_texref,
+            ary->handle(), CU_TRSA_OVERRIDE_FORMAT));
         m_array = ary;
       }
 
       unsigned int set_address(CUdeviceptr dptr, unsigned int bytes, bool allow_offset=false)
-      { 
+      {
         unsigned int byte_offset;
         CUDAPP_CALL_GUARDED(cuTexRefSetAddress, (&byte_offset,
-              m_texref, dptr, bytes)); 
+              m_texref, dptr, bytes));
 
         if (!allow_offset && byte_offset != 0)
           throw cuda::error("texture_reference::set_address", CUDA_ERROR_INVALID_VALUE,
@@ -844,10 +873,10 @@ namespace cuda
       }
 
 #if CUDA_VERSION >= 2020
-      void set_address_2d(CUdeviceptr dptr, 
+      void set_address_2d(CUdeviceptr dptr,
           const CUDA_ARRAY_DESCRIPTOR &descr, unsigned int pitch)
-      { 
-        CUDAPP_CALL_GUARDED(cuTexRefSetAddress2D, (m_texref, &descr, dptr, pitch)); 
+      {
+        CUDAPP_CALL_GUARDED(cuTexRefSetAddress2D, (m_texref, &descr, dptr, pitch));
       }
 #endif
 
@@ -908,6 +937,48 @@ namespace cuda
 
 
 
+#if CUDA_VERSION >= 3010
+  // surface reference --------------------------------------------------------
+  class module;
+
+  class surface_reference : public  boost::noncopyable
+  {
+    private:
+      CUsurfref m_surfref;
+
+      // life support for array and module
+      boost::shared_ptr<array> m_array;
+      boost::shared_ptr<module> m_module;
+
+    public:
+      surface_reference(CUsurfref sr)
+        : m_surfref(sr)
+      { }
+
+      void set_module(boost::shared_ptr<module> mod)
+      { m_module = mod; }
+
+      CUsurfref handle() const
+      { return m_surfref; }
+
+      void set_array(boost::shared_ptr<array> ary, unsigned int flags)
+      {
+        CUDAPP_CALL_GUARDED(cuSurfRefSetArray, (m_surfref, ary->handle(), flags));
+        m_array = ary;
+      }
+
+      array *get_array()
+      {
+        CUarray result;
+        CUDAPP_CALL_GUARDED(cuSurfRefGetArray, (&result, m_surfref));
+        return new array(result, false);
+      }
+  };
+#endif
+
+
+
+
   // module -------------------------------------------------------------------
   class function;
 
@@ -953,7 +1024,8 @@ namespace cuda
   }
 
   inline
-  texture_reference *module_get_texref(boost::shared_ptr<module> mod, const char *name)
+  texture_reference *module_get_texref(
+      boost::shared_ptr<module> mod, const char *name)
   {
     CUtexref tr;
     CUDAPP_CALL_GUARDED(cuModuleGetTexRef, (&tr, mod->handle(), name));
@@ -962,6 +1034,20 @@ namespace cuda
     result->set_module(mod);
     return result.release();
   }
+
+#if CUDA_VERSION >= 3010
+  inline
+  surface_reference *module_get_surfref(
+      boost::shared_ptr<module> mod, const char *name)
+  {
+    CUsurfref sr;
+    CUDAPP_CALL_GUARDED(cuModuleGetSurfRef, (&sr, mod->handle(), name));
+    std::auto_ptr<surface_reference> result(
+        new surface_reference(sr));
+    result->set_module(mod);
+    return result.release();
+  }
+#endif
 
 
 
@@ -979,56 +1065,56 @@ namespace cuda
       { }
 
       void set_block_shape(int x, int y, int z)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-            cuFuncSetBlockShape, (m_function, x, y, z), m_symbol); 
+            cuFuncSetBlockShape, (m_function, x, y, z), m_symbol);
       }
       void set_shared_size(unsigned int bytes)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-            cuFuncSetSharedSize, (m_function, bytes), m_symbol); 
+            cuFuncSetSharedSize, (m_function, bytes), m_symbol);
       }
 
       void param_set_size(unsigned int bytes)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-            cuParamSetSize, (m_function, bytes), m_symbol); 
+            cuParamSetSize, (m_function, bytes), m_symbol);
       }
       void param_set(int offset, unsigned int value)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-            cuParamSeti, (m_function, offset, value), m_symbol); 
+            cuParamSeti, (m_function, offset, value), m_symbol);
       }
       void param_set(int offset, float value)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-          cuParamSetf, (m_function, offset, value), m_symbol); 
+          cuParamSetf, (m_function, offset, value), m_symbol);
       }
       void param_setv(int offset, void *buf, unsigned long len)
-      { 
+      {
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
-            cuParamSetv, (m_function, offset, buf, len), m_symbol); 
+            cuParamSetv, (m_function, offset, buf, len), m_symbol);
       }
       void param_set_texref(const texture_reference &tr)
-      { 
-        CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(cuParamSetTexRef, (m_function, 
-            CU_PARAM_TR_DEFAULT, tr.handle()), m_symbol); 
+      {
+        CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(cuParamSetTexRef, (m_function,
+            CU_PARAM_TR_DEFAULT, tr.handle()), m_symbol);
       }
 
       void launch()
-      { 
+      {
         CUDAPP_CALL_GUARDED_THREADED_WITH_TRACE_INFO(
-            cuLaunch, (m_function), m_symbol); 
+            cuLaunch, (m_function), m_symbol);
       }
       void launch_grid(int grid_width, int grid_height)
-      { 
+      {
         CUDAPP_CALL_GUARDED_THREADED_WITH_TRACE_INFO(
-          cuLaunchGrid, (m_function, grid_width, grid_height), m_symbol); 
+          cuLaunchGrid, (m_function, grid_width, grid_height), m_symbol);
       }
       void launch_grid_async(int grid_width, int grid_height, const stream &s)
-      { 
+      {
         CUDAPP_CALL_GUARDED_THREADED_WITH_TRACE_INFO(
-            cuLaunchGridAsync, (m_function, grid_width, grid_height, s.handle()), 
+            cuLaunchGridAsync, (m_function, grid_width, grid_height, s.handle()),
             m_symbol);
       }
 
@@ -1039,6 +1125,14 @@ namespace cuda
         CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
             cuFuncGetAttribute, (&result, attr, m_function), m_symbol);
         return result;
+      }
+#endif
+
+#if CUDA_VERSION >= 3000 && defined(CUDAPP_POST_30_BETA)
+      void set_cache_config(CUfunc_cache fc)
+      {
+        CUDAPP_CALL_GUARDED_WITH_TRACE_INFO(
+            cuFuncSetCacheConfig, (m_function, fc), m_symbol);
       }
 #endif
   };
@@ -1063,7 +1157,7 @@ namespace cuda
     return py::make_tuple(free, total);
   }
 
-  inline 
+  inline
   CUdeviceptr mem_alloc(unsigned long bytes)
   {
     CUdeviceptr devptr;
@@ -1071,7 +1165,7 @@ namespace cuda
     return devptr;
   }
 
-  inline 
+  inline
   void mem_free(CUdeviceptr devptr)
   {
     CUDAPP_CALL_GUARDED_CLEANUP(cuMemFree, (devptr));
@@ -1116,7 +1210,7 @@ namespace cuda
         if (m_valid)
           free();
       }
-      
+
       operator CUdeviceptr() const
       { return m_devptr; }
   };
@@ -1153,8 +1247,8 @@ namespace cuda
 
   inline
   void memcpy_atoa(
-      array const &dst, unsigned int dst_index, 
-      array const &src, unsigned int src_index, 
+      array const &dst, unsigned int dst_index,
+      array const &src, unsigned int src_index,
       unsigned int len)
   { CUDAPP_CALL_GUARDED_THREADED(cuMemcpyAtoA, (dst.handle(), dst_index, src.handle(), src_index, len)); }
 
@@ -1305,9 +1399,9 @@ namespace cuda
       { }
 
       ~host_allocation()
-      { 
+      {
         if (m_valid)
-          free(); 
+          free();
       }
 
       void free()
@@ -1317,7 +1411,7 @@ namespace cuda
           try
           {
             scoped_context_activation ca(get_context());
-            mem_free_host(m_data); 
+            mem_free_host(m_data);
           }
           CUDAPP_CATCH_CLEANUP_ON_DEAD_CONTEXT(host_allocation);
 
@@ -1327,7 +1421,7 @@ namespace cuda
         else
           throw cuda::error("host_allocation::free", CUDA_ERROR_INVALID_HANDLE);
       }
-      
+
       void *data()
       { return m_data; }
 
@@ -1356,17 +1450,17 @@ namespace cuda
       { CUDAPP_CALL_GUARDED(cuEventCreate, (&m_event, flags)); }
 
       ~event()
-      { 
+      {
         try
         {
           scoped_context_activation ca(get_context());
-          CUDAPP_CALL_GUARDED_CLEANUP(cuEventDestroy, (m_event)); 
+          CUDAPP_CALL_GUARDED_CLEANUP(cuEventDestroy, (m_event));
         }
         CUDAPP_CATCH_CLEANUP_ON_DEAD_CONTEXT(event);
       }
 
       event *record(py::object stream_py)
-      { 
+      {
         CUstream s_handle;
         if (stream_py.ptr() != Py_None)
         {
@@ -1376,27 +1470,27 @@ namespace cuda
         else
           s_handle = 0;
 
-        CUDAPP_CALL_GUARDED(cuEventRecord, (m_event, s_handle)); 
+        CUDAPP_CALL_GUARDED(cuEventRecord, (m_event, s_handle));
         return this;
       }
 
       event *synchronize()
-      { 
-        CUDAPP_CALL_GUARDED_THREADED(cuEventSynchronize, (m_event)); 
+      {
+        CUDAPP_CALL_GUARDED_THREADED(cuEventSynchronize, (m_event));
         return this;
       }
 
       bool query() const
-      { 
+      {
 #ifdef TRACE_CUDA
         std::cerr << "cuEventQuery" << std::endl;
 #endif
         CUresult result = cuEventQuery(m_event);
         switch (result)
         {
-          case CUDA_SUCCESS: 
+          case CUDA_SUCCESS:
             return true;
-          case CUDA_ERROR_NOT_READY: 
+          case CUDA_ERROR_NOT_READY:
             return false;
           default:
             throw error("cuEventQuery", result);

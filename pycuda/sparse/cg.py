@@ -65,6 +65,33 @@ class CGStateContainer:
 
         return out
 
+    @memoize_method
+    def guarded_div_kernel(self, dtype_x, dtype_y, dtype_z):
+        from pycuda.elementwise import get_elwise_kernel
+        from pycuda.tools import dtype_to_ctype
+        return get_elwise_kernel(
+                "%(tp_x)s *x, %(tp_y)s *y, %(tp_z)s *z" % {
+                    "tp_x": dtype_to_ctype(dtype_x),
+                    "tp_y": dtype_to_ctype(dtype_y),
+                    "tp_z": dtype_to_ctype(dtype_z),
+                    },
+                "z[i] = y[i] == 0 ? 0 : (x[i] / y[i])",
+                "divide")
+
+    def guarded_div(self, a, b):
+        from pycuda.gpuarray import _get_common_dtype
+        result = a._new_like_me(_get_common_dtype(a, b))
+
+        assert a.shape == b.shape
+
+        func = self.guarded_div_kernel(a.dtype, b.dtype, result.dtype)
+        func.set_block_shape(*a._block)
+        func.prepared_async_call(a._grid, None,
+                a.gpudata, b.gpudata,
+                result.gpudata, a.mem_size)
+
+        return result
+
     def reset(self, rhs, x=None):
         self.rhs = rhs
 
@@ -90,7 +117,7 @@ class CGStateContainer:
 
         q = self.operator(self.d)
         myip = gpuarray.dot(self.d, q)
-        alpha = self.delta / myip
+        alpha = self.guarded_div(self.delta, myip)
 
         self.lc2(1, self.x, alpha, self.d, out=self.x)
 
@@ -105,7 +132,7 @@ class CGStateContainer:
         delta = AsyncInnerProduct(self.residual, s,
                 self.pagelocked_allocator)
         self.delta = delta.gpu_result
-        beta = self.delta / delta_old;
+        beta = self.guarded_div(self.delta, delta_old)
 
         self.lc2(1, s, beta, self.d, out=self.d)
 
@@ -113,14 +140,18 @@ class CGStateContainer:
             self.real_delta_queue.append(delta)
 
     def run(self, max_iterations=None, tol=1e-7, debug_callback=None):
+        check_interval = 20
+
         if max_iterations is None:
-            max_iterations = 10 * self.operator.shape[0]
+            max_iterations = max(
+                    3*check_interval+1, 10 * self.operator.shape[0])
+        real_resid_interval = min(self.operator.shape[0], 50)
 
         iterations = 0
         delta_0 = None
         while iterations < max_iterations:
             compute_real_residual = \
-                    iterations % 50 == 0
+                    iterations % real_resid_interval == 0
 
             self.one_iteration(
                     compute_real_residual=compute_real_residual)
@@ -137,7 +168,7 @@ class CGStateContainer:
             # do often enough to allow AsyncInnerProduct
             # to progress through (polled) event chain
             rdq = self.real_delta_queue
-            if iterations % 20 == 0:
+            if iterations % check_interval == 0:
                 if delta_0 is None:
                     delta_0 = rdq[0].get_host_result()
                     if delta_0 is not None:
@@ -148,7 +179,6 @@ class CGStateContainer:
                     while i < len(rdq):
                         delta = rdq[i].get_host_result()
                         if delta is not None:
-                            print abs(delta) / abs(delta_0)
                             if abs(delta) < tol*tol * abs(delta_0):
                                 if debug_callback is not None:
                                     debug_callback("end", iterations,
