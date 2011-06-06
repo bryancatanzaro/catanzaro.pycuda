@@ -963,7 +963,7 @@ BOOST_PYTHON_MODULE(_driver)
 
   {
     typedef device_allocation cl;
-    py::class_<cl, boost::noncopyable>("DeviceAllocation", py::no_init)
+    py::class_<cl, boost::noncopyable>("DeviceAllocation", py::init<CUdeviceptr, bool>())
       .def("__int__", &cl::operator CUdeviceptr)
       .def("__long__", device_allocation_to_long)
       .DEF_SIMPLE_METHOD(free)
